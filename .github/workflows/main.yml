@@ -1,8 +1,6 @@
 name: CI - PDSI2
 
-on:
-  push:
-  pull_request:
+on: [push, pull_request]
 
 jobs:
   test:
@@ -22,19 +20,45 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install python-dotenv
+          pip install python-dotenv psycopg2-binary
 
-      - name: Create .env file
+      - name: Create .env file with validation
         working-directory: ./
         run: |
-          echo "DB_USER=${{ secrets.DB_USER }}" > .env
-          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-          echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
-          echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
-          echo "DB_PORT=${{ secrets.DB_PORT }}" >> .env
-          cat .env  # Para verificação/debug
+          # Validação das variáveis obrigatórias
+          if [ -z "${{ secrets.DB_PORT }}" ]; then
+            echo "::error::DB_PORT não está definido nos secrets!"
+            exit 1
+          fi
 
-      - name: Run tests with pytest
+          cat <<EOF > .env
+          DB_USER=${{ secrets.DB_USER || 'postgres' }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD || 'postgres' }}
+          DB_NAME=${{ secrets.DB_NAME || 'test_db' }}
+          DB_HOST=${{ secrets.DB_HOST || 'localhost' }}
+          DB_PORT=${{ secrets.DB_PORT || '5432' }}
+          EOF
+
+          echo "Conteúdo do .env:"
+          cat .env
+
+      - name: Validate database connection
         working-directory: ./
         run: |
-          pytest teste.py -v
+          python -c "
+          import os
+          from dotenv import load_dotenv
+          load_dotenv()
+          
+          required = ['DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_HOST', 'DB_PORT']
+          missing = [var for var in required if not os.getenv(var)]
+          if missing:
+              raise ValueError(f'Variáveis faltando: {missing}')
+          
+          print(f\"DB_HOST: {os.getenv('DB_HOST')}\")
+          print(f\"DB_PORT: {os.getenv('DB_PORT')}\")
+          "
+
+      - name: Run tests
+        working-directory: ./
+        run: pytest teste.py -v
