@@ -1,19 +1,4 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-*.egg
-.pytest_cache/
+__pycache__
 venv/
+.pytest_cache
 .env
-.env.local
-
-# IDE/Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Sistema
-.DS_Store
-Thumbs.db
