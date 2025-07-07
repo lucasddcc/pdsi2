@@ -5,21 +5,15 @@ import os
 
 load_dotenv()
 
-# Validação robusta das variáveis
-required_vars = ['DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_HOST', 'DB_PORT']
-missing_vars = [var for var in required_vars if not os.getenv(var)]
-if missing_vars:
-    raise ValueError(f"Variáveis de ambiente faltando: {missing_vars}")
-
-try:
-    DB_PORT = int(os.getenv("DB_PORT", "5432"))  # Converte para int com valor padrão
-except ValueError:
-    raise ValueError("DB_PORT deve ser um número inteiro válido")
-
-SQLALCHEMY_DATABASE_URL = (
-    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@"
-    f"{os.getenv('DB_HOST')}:{DB_PORT}/{os.getenv('DB_NAME')}"
-)
+# Modo seguro para CI (GitHub Actions)
+if os.getenv('GITHUB_ACTIONS') == 'true':
+    SQLALCHEMY_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/test_db"
+else:
+    # Modo local/produção (usa .env)
+    SQLALCHEMY_DATABASE_URL = (
+        f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
+        f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+    )
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
