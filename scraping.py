@@ -2,52 +2,93 @@ import requests
 from bs4 import BeautifulSoup
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
- 
-orangeFill = PatternFill(start_color='FFC000',
-                   end_color='FFC000',
-                   fill_type='solid')
- 
-blueFill = PatternFill(start_color='00B0F0',
-                   end_color='00B0F0',
-                   fill_type='solid')
- 
-wb = Workbook()
+from sqlalchemy import create_engine, Table, Column, Integer, Text, TIMESTAMP, MetaData
+from dotenv import load_dotenv
+import logging
+from datetime import datetime
+import os
 
-del wb['Sheet']
+# Configuração
+load_dotenv()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-sheet = wb.create_sheet('planilha')
+# Estilos Excel
+orangeFill = PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid')
+blueFill = PatternFill(start_color='00B0F0', end_color='00B0F0', fill_type='solid')
 
-response = requests.get('https://ufu.br/')
+# Banco de Dados
+DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+engine = create_engine(DB_URL)
+metadata = MetaData()
 
-if(response.status_code == 200):
-    soup = BeautifulSoup(response.content, 'html.parser')
-    print(soup.title.contents)
+menu_table = Table('menu_ufu', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('item_menu', Text),
+    Column('link', Text),
+    Column('data_coleta', TIMESTAMP)
+)
+
+# Web Scraping
+def scrape_ufu_menu():
+    wb = Workbook()
+    if 'Sheet' in wb.sheetnames:
+        del wb['Sheet']
+    ws = wb.create_sheet('planilha')
     
-    leftBar = soup.find('ul', class_='sidebar-nav nav-level-0')
-    leftBarLines = leftBar.find_all('li', class_='nav-item')
+    # Cabeçalhos
+    ws.cell(1, 1, "Menu Nav").fill = orangeFill
+    ws.cell(1, 2, "Links").fill = blueFill
 
-    initCapture = False
-    linesWishLeftBar = []
-    linksWishLeftBar = []
-    for li in leftBarLines:
-        if 'Graduação' in li.text.strip():
-            initCapture = True
+    try:
+        response = requests.get('https://ufu.br/', timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        leftBar = soup.find('ul', class_='sidebar-nav nav-level-0')
+        leftBarLines = leftBar.find_all('li', class_='nav-item') if leftBar else []
+        
+        init_capture = False
+        row = 2  # Começa na linha 2 (abaixo do cabeçalho)
+        
+        with engine.connect() as conn:
+            conn.execute(menu_table.delete())  # Limpa tabela existente
+            
+            for li in leftBarLines:
+                text = li.get_text(strip=True)
+                link = li.a.get('href') if li.a else ''
+                
+                # Ativa captura após encontrar "Graduação"
+                if 'Graduação' in text:
+                    init_capture = True
+                
+                if init_capture and text and link:
+                    full_link = f"https://ufu.br{link}" if link.startswith('/') else link
+                    
+                    # Excel
+                    ws.cell(row, 1, text)
+                    ws.cell(row, 2, full_link)
+                    
+                    # PostgreSQL
+                    conn.execute(
+                        menu_table.insert().values(
+                            item_menu=text,
+                            link=full_link,
+                            data_coleta=datetime.now()
+                        )
+                    )
+                    row += 1
+            
+            conn.commit()
+            logger.info(f"{row-2} itens salvos no banco de dados")
+        
+        wb.save("UFU_menu_nav.xlsx")
+        logger.info("Planilha gerada: UFU_menu_nav.xlsx")
+        
+    except Exception as e:
+        logger.error(f"Erro: {str(e)}")
+    finally:
+        engine.dispose()
 
-        if initCapture:
-            linesWishLeftBar.append(li.text.strip())
-            linksWishLeftBar.append(li.a.get('href'))
-            linesWishLeftBar
-
-sheet.cell(1,1).value = "Menu Nav"
-sheet.cell(1,1).fill = orangeFill
- 
-sheet['B1'] = "Links"
-sheet['B1'].fill = blueFill
- 
-for i, linha in enumerate(linesWishLeftBar):
-    sheet.cell(i+2,1).value = linha
- 
-for i, link in enumerate(linksWishLeftBar): 
-    sheet.cell(i+2,2).value = "https://ufu.br"+link
- 
-wb.save("UFU_menu_nav.xlsx")
+if __name__ == "__main__":
+    scrape_ufu_menu()
